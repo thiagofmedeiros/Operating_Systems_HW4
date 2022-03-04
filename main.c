@@ -8,6 +8,10 @@
 #include <sys/types.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <sys/resource.h>
+
+#define READERS_QTY 250000000
+#define WRITER_QTY 25000
 
 struct shared_dat
 {
@@ -19,62 +23,98 @@ bool in_cs = false;
 sem_t mutex;
 sem_t writing;
 bool writerActive = false;
-bool canRead = false;
 int numReadsWithoutWriting = 0;
 int numOfActiveReaders = 0;
 int numOfReaders = 0;
+
+struct rusage mytiming;
 
 void * reader_thread(void *arg) {
     int reader_number = (int) arg;
     int i = 0;
     bool ignoreWriter = false;
+    bool canRead = false;
+
+    int readBlocked = 0;
 
     printf("Reader %d started\n", reader_number);
 
-    while (i < 2500000) {
+    while (i < READERS_QTY) {
 
         sem_wait (&writing);
         ignoreWriter = !writerActive;
-        sem_post(&writing);
+        sem_post (&writing);
 
-        if (ignoreWriter) {
+        if(ignoreWriter) {
+            canRead = true;
             counter->value = counter->value;
             i++;
         } else {
-
+            //printf("Reader %d  waiting for sem\n", reader_number);
             sem_wait(&mutex);
+            //printf("Reader %d  got sem\n", reader_number);
 
             numOfActiveReaders++;
 
-            if (numOfActiveReaders == 1 &&
-                numReadsWithoutWriting < numOfActiveReaders) {
-
+            if (numOfActiveReaders == 1) {
                 sem_wait(&writing);
             }
 
-            if (numReadsWithoutWriting < numOfActiveReaders) {
+            if (numReadsWithoutWriting < numOfReaders) {
                 canRead = true;
-                numReadsWithoutWriting++;
             } else {
-                canRead = false;
-            }
-
-            sem_post(&mutex);
-
-            if (canRead) {
-                counter->value = counter->value;
-                i++;
-
-                sem_wait(&mutex);
-
                 numOfActiveReaders--;
 
-                sem_post(&mutex);
+                canRead = false;
 
                 if (numOfActiveReaders == 0) {
                     sem_post(&writing);
                 }
             }
+/*
+            //printf("numOfActiveReaders %d\n", numOfActiveReaders);
+            if (numOfActiveReaders == 1) {
+                //printf("Semaphore to stop writer\n");
+                if (numReadsWithoutWriting < numOfReaders) {
+                    sem_wait(&writing);
+                    canRead = true;
+                } else {
+                    numOfActiveReaders--;
+                    canRead = false;
+                }
+            }
+            */
+            //printf("Reader %d  released sem\n", reader_number);
+            sem_post(&mutex);
+
+            if (canRead) {
+                if (in_cs) {
+                    printf("\nERROR: in_cs is set\n");
+                }
+
+                counter->value = counter->value;
+                numReadsWithoutWriting++;
+                i++;
+
+                //printf("Reader %d  waiting for sem\n", reader_number);
+                sem_wait(&mutex);
+                //printf("Reader %d  got sem\n", reader_number);
+
+                numOfActiveReaders--;
+
+                //printf("numOfActiveReaders %d\n", numOfActiveReaders);
+                if (numOfActiveReaders == 0) {
+                    //printf("Semaphore to free writer\n");
+                    sem_post(&writing);
+                }
+                //  printf("Reader %d  released sem\n", reader_number);
+                sem_post(&mutex);
+            }
+        }
+
+        if (canRead && i > 0 && i % (READERS_QTY/100) == 0) {
+            float percentage = i / (READERS_QTY/1.0);
+            printf("Reader %d read %.0f%\n", reader_number, percentage * 100);
         }
     }
     printf("Reader %d finished\n", reader_number);
@@ -85,30 +125,37 @@ void * reader_thread(void *arg) {
 void * writer_thread(void *arg) {
     int i;
 
+    sem_wait (&writing);
     printf("Writer Started\n");
-
-    sem_wait(&writing);
     writerActive = true;
     sem_post (&writing);
 
-    for(i = 0; i < 2500000 * 18; i++) {
+    for(i = 0; i < WRITER_QTY; i++) {
+        //printf("Writer waiting for semaphore\n");
         sem_wait (&writing);
+        //printf("Writer semaphore free\n");
 
-        //printf("Writer acquired lock\n");
         in_cs = true;
         counter->value += 1;
+        //printf("%d\n", counter->value);
+        if (counter->value % (WRITER_QTY/100) == 0) {
+            float percentage = counter->value / (WRITER_QTY/1.0);
+            printf("Writer %.0f%\n", percentage * 100);
+        }
 
-        // printf("Writer %d\n", counter->value);
-
-        //printf("Writer released lock\n");
-        numReadsWithoutWriting = 0;
+        if (numReadsWithoutWriting > 0) {
+            numReadsWithoutWriting = 0;
+        }
         in_cs = false;
 
+        //printf("Writer semaphore released\n");
         sem_post (&writing);
     }
-    sem_wait(&writing);
+
+    sem_wait (&writing);
     writerActive = false;
     sem_post (&writing);
+
     printf("Writer finished\n");
 
     return(NULL);
@@ -157,8 +204,14 @@ int main(int argc, char** argv) {
             pthread_join(writer[0], NULL);
 
             for (i = 0; i < numOfReaders; i++) {
-                pthread_join(readers[0], NULL);
+                pthread_join(readers[i], NULL);
             }
+
+            getrusage(RUSAGE_SELF, &mytiming);
+            printf("Time used is sec: %d, usec %d\n",mytiming.ru_utime.tv_sec,
+                   mytiming.ru_utime.tv_usec);
+            printf("System Time used is sec: %d, usec %d\n",mytiming.ru_stime.tv_sec,
+                   mytiming.ru_stime.tv_usec);
 
             return 0;
         }
