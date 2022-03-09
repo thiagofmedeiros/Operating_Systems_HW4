@@ -70,8 +70,10 @@ void *reader_thread(void *arg) {
         sem_post(&mutex);
     }
 
+    int i;
+
     //printf("Reader %d started\n", reader_number);
-    for (int i = 0; i < READERS_QTY; i++) {
+    for (i = 0; i < READERS_QTY; i++) {
         // Error flag check
         if (in_cs) {
             printf("\nERROR: in_cs is set\n");
@@ -103,7 +105,9 @@ void *writer_thread(void *arg) {
     sem_wait(&writing);
     printf("Writer Started\n");
 
-    for (int i = 0; i < WRITER_QTY; i++) {
+    int i;
+
+    for (i = 0; i < WRITER_QTY; i++) {
         in_cs = true;
         counter->value += 1;
         in_cs = false;
@@ -129,7 +133,6 @@ int main(int argc, char **argv) {
             // Ensure fairness with random number
             srand(time(0));
             numOfReadersAllowedToStartBeforeWriter = rand() % numOfReaders;
-            printf("\nnumOfReadersAllowedToFinishBeforeWriter %d\n\n", numOfReadersAllowedToStartBeforeWriter);
 
             pthread_t readers[18];     /* process id for thread 1 */
             pthread_t writer[1];     /* process id for thread 1 */
@@ -145,8 +148,10 @@ int main(int argc, char **argv) {
 
             int k = (int) (numOfReaders / 2);
 
+            int i;
+
             /* Create half of readers */
-            for (int i = 0; i < k; i++) {
+            for (i = 0; i < k; i++) {
                 pthread_create(&readers[i], &attr[0], reader_thread, (void *) i);
             }
 
@@ -154,13 +159,13 @@ int main(int argc, char **argv) {
             pthread_create(&writer[0], &attr[0], writer_thread, NULL);
 
             /* Create last half of readers */
-            for (int i = k; i < numOfReaders; i++) {
+            for (i = k; i < numOfReaders; i++) {
                 pthread_create(&readers[i], &attr[0], reader_thread, (void *) i);
             }
 
             pthread_join(writer[0], NULL);
 
-            for (int i = 0; i < numOfReaders; i++) {
+            for (i = 0; i < numOfReaders; i++) {
                 pthread_join(readers[i], NULL);
             }
 
@@ -177,7 +182,7 @@ int main(int argc, char **argv) {
             return 1;
         }
     } else {
-        printf("Expecting 1 parameter and received %d\n", argc);
+        printf("Expecting 1 parameter and received %d\n", argc - 1);
 
         return 1;
     }
